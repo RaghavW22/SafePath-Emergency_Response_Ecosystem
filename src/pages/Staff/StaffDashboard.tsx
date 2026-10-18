@@ -911,7 +911,7 @@ export default function StaffDashboard() {
     // Initial danger zones fetch
     dangerApi.getDangerZones().then(zones => {
       setDangerZones(zones.map(z => ({ roomId: z.room_id, level: z.level as 'warning' | 'danger' })));
-    }).catch(() => {});
+    }).catch(() => { });
 
     // Polling fallback instead of Supabase Realtime
     const pollInterval = setInterval(() => {
@@ -921,7 +921,7 @@ export default function StaffDashboard() {
       // 2. Fetch Danger Zones
       dangerApi.getDangerZones().then(zones => {
         setDangerZones(zones.map(z => ({ roomId: z.room_id, level: z.level as 'warning' | 'danger' })));
-      }).catch(() => {});
+      }).catch(() => { });
 
       // 3. Fetch Alerts and check for new ones
       api.getAlerts().then(data => {
@@ -939,7 +939,7 @@ export default function StaffDashboard() {
           }
           return data;
         });
-      }).catch(() => {});
+      }).catch(() => { });
 
       // 4. Fetch Rooms and Stats
       api.getRooms().then(data => {
@@ -957,7 +957,7 @@ export default function StaffDashboard() {
           total, occupied, available,
           byFloor: Object.values(floors).sort((a, b) => a.floor - b.floor)
         });
-      }).catch(() => {});
+      }).catch(() => { });
 
     }, 2000); // Poll every 2 seconds
 

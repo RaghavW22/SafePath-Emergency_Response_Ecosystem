@@ -13,3 +13,4 @@ backend/serviceAccountKey.json
 .pytest_cache/
 .coverage
 htmlcov/
+MediSimple/
