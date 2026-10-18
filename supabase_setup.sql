@@ -85,14 +85,17 @@ VALUES ('admin', 'Admin', 'admin123', 'admin')
 ON CONFLICT (staff_id) DO NOTHING;
 
 -- ============================================================
--- 7. ENABLE REALTIME FOR ALL TABLES
+-- 7. ENABLE REALTIME FOR ALL TABLES (Safe / Idempotent)
 -- ============================================================
-ALTER PUBLICATION supabase_realtime ADD TABLE rooms;
-ALTER PUBLICATION supabase_realtime ADD TABLE checkins;
-ALTER PUBLICATION supabase_realtime ADD TABLE alerts;
-ALTER PUBLICATION supabase_realtime ADD TABLE broadcasts;
-ALTER PUBLICATION supabase_realtime ADD TABLE danger_zones;
-ALTER PUBLICATION supabase_realtime ADD TABLE staff;
+DO $$
+BEGIN
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE rooms; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE checkins; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE alerts; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE broadcasts; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE danger_zones; EXCEPTION WHEN duplicate_object THEN NULL; END;
+  BEGIN ALTER PUBLICATION supabase_realtime ADD TABLE staff; EXCEPTION WHEN duplicate_object THEN NULL; END;
+END $$;
 
 -- ============================================================
 -- 8. ROW LEVEL SECURITY (permissive for hackathon)
@@ -105,9 +108,20 @@ ALTER TABLE danger_zones ENABLE ROW LEVEL SECURITY;
 ALTER TABLE staff ENABLE ROW LEVEL SECURITY;
 
 -- Allow all operations with anon key (hackathon-safe, not production-safe)
+DROP POLICY IF EXISTS "Allow all on rooms" ON rooms;
 CREATE POLICY "Allow all on rooms" ON rooms FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on checkins" ON checkins;
 CREATE POLICY "Allow all on checkins" ON checkins FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on alerts" ON alerts;
 CREATE POLICY "Allow all on alerts" ON alerts FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on broadcasts" ON broadcasts;
 CREATE POLICY "Allow all on broadcasts" ON broadcasts FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on danger_zones" ON danger_zones;
 CREATE POLICY "Allow all on danger_zones" ON danger_zones FOR ALL USING (true) WITH CHECK (true);
+
+DROP POLICY IF EXISTS "Allow all on staff" ON staff;
 CREATE POLICY "Allow all on staff" ON staff FOR ALL USING (true) WITH CHECK (true);

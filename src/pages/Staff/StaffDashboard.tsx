@@ -15,10 +15,12 @@ import Button from '../../components/Button/Button';
 import SeverityBadge from '../../components/Badge/SeverityBadge';
 import SafetyMap from '../../components/HospitalMap/SafetyMap';
 import { useAppStore } from '../../store/useAppStore';
-import { api } from '../../api/client';
+import { api, API_BASE } from '../../api/client';
 import type { RoomStatus, GuestRecord, StatsResponse, RegisterGuestResponse, ApiAlert, ApiBroadcast } from '../../api/client';
 import { supabase } from '../../supabase';
 import { api as dangerApi } from '../../api/client';
+
+const APP_BASE_URL = (import.meta.env.VITE_APP_URL as string)?.replace(/\/$/, '') || window.location.origin;
 
 type Tab = 'register' | 'alerts' | 'map' | 'guests' | 'broadcast' | 'occupancy' | 'staff';
 
@@ -81,7 +83,7 @@ function RegisterGuestTab() {
         mobile: form.mobile.trim(),
         guestsCount: form.guestsCount,
       });
-      const url = `${window.location.origin}/guest-login?token=${res.token}`;
+      const url = `${APP_BASE_URL}/guest-login?token=${res.token}`;
       setQrUrl(url);
       setResult(res);
       toast.success(`QR code generated for ${res.guest.guest_name}!`);
@@ -465,7 +467,7 @@ function GuestsTab() {
                           <button
                             onClick={() => setSelectedGuestQR({
                               name: g.guest_name,
-                              url: `${window.location.origin}/guest-login?token=${g.qr_token}`
+                              url: `${APP_BASE_URL}/guest-login?token=${g.qr_token}`
                             })}
                             className="text-emerald-400/60 hover:text-emerald-400 transition-colors"
                             title="View Resident QR"
@@ -1217,7 +1219,7 @@ export default function StaffDashboard() {
                       const originalText = broadcastText;
                       setBroadcastText('Generating suggestion...');
                       try {
-                        const res = await fetch(`http://${window.location.hostname}:5000/api/ai/suggest-broadcast?target=${broadcastTarget}`);
+                        const res = await fetch(`${API_BASE}/ai/suggest-broadcast?target=${broadcastTarget}`);
                         const data = await res.json();
                         setBroadcastText(data.suggestion);
                       } catch (e) {

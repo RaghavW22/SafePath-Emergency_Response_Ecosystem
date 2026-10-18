@@ -1,7 +1,7 @@
-const BASE = `http://${window.location.hostname}:5000/api`;
+export const API_BASE = (import.meta.env.VITE_API_URL as string)?.replace(/\/$/, '') || `http://${window.location.hostname}:5000/api`;
 
 async function apiFetch<T>(path: string, opts?: RequestInit): Promise<T> {
-  const res = await fetch(`${BASE}${path}`, {
+  const res = await fetch(`${API_BASE}${path}`, {
     headers: { 'Content-Type': 'application/json' },
     ...opts,
   });

@@ -24,10 +24,13 @@ SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 GEMINI_API_KEY=your_google_ai_key
 GMAIL_USER=your_email@gmail.com
 GMAIL_APP_PASSWORD=your_app_password
+FRONTEND_URL=https://your-deployed-frontend.com  # Set to your deployed domain (or leave unset for localhost)
 
 # Frontend
 VITE_SUPABASE_URL=your_project_url
 VITE_SUPABASE_ANON_KEY=your_anon_key
+VITE_API_URL=https://your-backend-api.onrender.com/api  # Set to your backend API URL in production
+VITE_APP_URL=https://your-deployed-frontend.com  # Explicit URL for QR codes (defaults to window.location.origin)
 ```
 
 ### Backend Setup

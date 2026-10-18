@@ -84,7 +84,7 @@ def register_guest():
             'checkin_datetime': now
         })
 
-        base_url = request.headers.get('Origin', 'http://localhost:5173')
+        base_url = (os.environ.get('FRONTEND_URL') or request.headers.get('Origin', 'http://localhost:5173')).rstrip('/')
         send_checkin_notifications(name, room_number, base_url, token, email, mobile)
 
         return jsonify({'success': True, 'token': token, 'guest': checkin_data}), 201
@@ -323,7 +323,7 @@ def ai_suggest_broadcast():
         try:
             prompt = f"Write a single sentence emergency broadcast announcement to guests in {target}. Keep it extremely concise, professional, and clear."
             resp = client.models.generate_content(
-                model='gemini-1.5-flash',
+                model='gemini-2.5-flash',
                 contents=prompt
             )
             suggestion = resp.text.strip().replace('"', '')
@@ -450,7 +450,7 @@ def resend_email():
         if not guest:
             return jsonify({'error': 'No active resident found for this unit'}), 404
 
-        base_url = request.headers.get('Origin', 'http://localhost:5173')
+        base_url = (os.environ.get('FRONTEND_URL') or request.headers.get('Origin', 'http://localhost:5173')).rstrip('/')
         send_checkin_notifications(
             guest['guest_name'],
             guest['room_number'],
