@@ -427,7 +427,7 @@ def create_broadcast():
     data = request.get_json(force=True)
     target = str(data.get('target', 'all'))
     message = str(data.get('message', ''))
-    now = datetime.now().strftime('%Y-%m-%dT%H:%M:%S')
+    now = datetime.now().strftime('%Y-%m-%dT%H:%M:%SZ')
 
     b_id = str(uuid.uuid4())
     b_data = {'id': b_id, 'target': target, 'message': message, 'timestamp': now}

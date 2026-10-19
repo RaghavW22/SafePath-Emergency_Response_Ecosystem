@@ -188,6 +188,7 @@ export default function GuestDashboard() {
   const [emergencyCategory, setEmergencyCategory] = useState<string>('Medical Emergency');
   const [customEmergency, setCustomEmergency] = useState<string>('');
   const spokenIds = useRef<Set<string>>(new Set());  // tracks already-spoken broadcast IDs
+  const isInitialLoad = useRef<boolean>(true);
 
   // Predefined emergency options with pre-assigned severity levels
   const EMERGENCY_OPTIONS: { label: string; severity: 1 | 2 | 3 | 4 | 5 }[] = [
@@ -237,23 +238,33 @@ export default function GuestDashboard() {
       );
       setApiBroadcasts(relevant);
 
-      // Only speak broadcasts that are NEW since this session started
-      // and NOT older than 2 minutes (avoids replay of old emergencies on refresh)
-      const nowMs = Date.now();
+      // On initial cold page load, populate spokenIds so old historical messages don't blast
+      if (isInitialLoad.current) {
+        isInitialLoad.current = false;
+        relevant.forEach((m: any) => {
+          const id = m.id || m.timestamp + m.message;
+          spokenIds.current.add(id);
+        });
+        return;
+      }
+
+      // Automatically speak and trigger listen button as soon as ANY new message arrives
       relevant.forEach((msg: any) => {
         const id = msg.id || msg.timestamp + msg.message;
-        const msgTime = new Date(msg.timestamp).getTime();
-        const isRecent = nowMs - msgTime < 120000; // Last 2 minutes
 
         if (!spokenIds.current.has(id)) {
           spokenIds.current.add(id);
 
-          // Only speak if this wasn't the very first fetch of old history during a cold session
-          // We allow some flexibility but basically don't want a wall of sound on refresh
-          if (isRecent) {
-            setTimeout(() => speak(msg.message, guestProfile?.language || 'English'), 500);
-            toast(`📢 ${msg.message}`, { duration: 6000 });
-          }
+          // 1. Immediately unlock audio and speak in the guest's chosen language
+          unlockAudio();
+          speak(msg.message, guestProfile?.language || 'English');
+          toast(`📢 ${msg.message}`, { duration: 8000 });
+
+          // 2. Programmatically click the listen button on the message card
+          setTimeout(() => {
+            const btn = document.getElementById(`listen-btn-${msg.id || id}`);
+            if (btn) (btn as HTMLButtonElement).click();
+          }, 300);
         }
       });
     } catch { /* offline */ }
@@ -521,6 +532,7 @@ export default function GuestDashboard() {
                         <span className="text-white/40 text-xs">{msg.timestamp.split('T')[1] ?? msg.timestamp}</span>
                         <div className="flex items-center gap-2">
                           <button
+                            id={`listen-btn-${msg.id || (msg.timestamp + msg.message)}`}
                             onClick={() => {
                               unlockAudio();
                               speak(msg.message, guestProfile?.language || 'English');
