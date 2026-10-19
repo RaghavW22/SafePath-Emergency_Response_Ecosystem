@@ -14,6 +14,7 @@ import type { RoomStatus } from '../../api/client';
 import { supabase } from '../../supabase';
 
 // Language name → BCP-47 code for SpeechSynthesis
+// Language name → BCP-47 code for SpeechSynthesis
 const LANG_CODE: Record<string, string> = {
   English: 'en-US', Hindi: 'hi-IN', Russian: 'ru-RU', Spanish: 'es-ES',
   French: 'fr-FR', German: 'de-DE', Chinese: 'zh-CN', Japanese: 'ja-JP',
@@ -23,53 +24,50 @@ const LANG_CODE: Record<string, string> = {
 
 let speechQueue: { text: string; langName: string }[] = [];
 let isSpeaking = false;
+let speechWatchdog: any = null;
+let sharedAudioCtx: AudioContext | null = null;
+let audioUnlocked = false;
 
-function processQueue() {
-  if (isSpeaking || speechQueue.length === 0) return;
-
-  const { text, langName } = speechQueue.shift()!;
-  if (!window.speechSynthesis) return;
-
-  isSpeaking = true;
-  window.speechSynthesis.cancel(); // Force stop any current (though queue should handle it)
-
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.lang = LANG_CODE[langName] || 'en-US';
-  utt.rate = 0.95;
-  utt.volume = 1;
-
-  const doSpeak = () => {
-    const voices = window.speechSynthesis.getVoices();
-    const match = voices.find(v => v.lang === utt.lang) ||
-      voices.find(v => v.lang.startsWith(utt.lang.slice(0, 2)));
-    if (match) utt.voice = match;
-
-    utt.onend = () => {
-      isSpeaking = false;
-      setTimeout(processQueue, 500); // Small pause between messages
-    };
-    utt.onerror = () => {
-      isSpeaking = false;
-      processQueue();
-    };
-
-    window.speechSynthesis.speak(utt);
-  };
-
-  if (window.speechSynthesis.getVoices().length === 0) {
-    window.speechSynthesis.onvoiceschanged = () => {
-      doSpeak();
-      window.speechSynthesis.onvoiceschanged = null;
-    };
-  } else {
-    doSpeak();
+// Auto-unlock audio and speech on first user gesture
+export function unlockAudio() {
+  if (audioUnlocked) return;
+  audioUnlocked = true;
+  try {
+    const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+    if (AudioContextClass) {
+      if (!sharedAudioCtx) sharedAudioCtx = new AudioContextClass();
+      if (sharedAudioCtx.state === 'suspended') {
+        sharedAudioCtx.resume().catch(() => {});
+      }
+    }
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.resume();
+      // Prime with silent character to grant autoplay permission
+      const prime = new SpeechSynthesisUtterance(' ');
+      prime.volume = 0.01;
+      window.speechSynthesis.speak(prime);
+    }
+  } catch (e) {
+    // ignore
   }
+}
+
+if (typeof window !== 'undefined') {
+  ['click', 'touchstart', 'keydown'].forEach(evt => {
+    window.addEventListener(evt, unlockAudio, { once: true, passive: true });
+  });
 }
 
 function playChime() {
   try {
     const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-    const ctx = new AudioContextClass();
+    if (!AudioContextClass) return;
+    if (!sharedAudioCtx) sharedAudioCtx = new AudioContextClass();
+    if (sharedAudioCtx.state === 'suspended') {
+      sharedAudioCtx.resume().catch(() => {});
+    }
+
+    const ctx = sharedAudioCtx;
     const osc = ctx.createOscillator();
     const gain = ctx.createGain();
     osc.type = 'triangle';
@@ -86,7 +84,92 @@ function playChime() {
   } catch (e) { }
 }
 
+function processQueue() {
+  if (isSpeaking || speechQueue.length === 0) return;
+  if (!('speechSynthesis' in window)) return;
+
+  const item = speechQueue.shift();
+  if (!item || !item.text || !item.text.trim()) return;
+  const { text, langName } = item;
+
+  isSpeaking = true;
+  clearTimeout(speechWatchdog);
+
+  // Safety watchdog: ensure queue never gets permanently locked if browser speech hangs
+  speechWatchdog = setTimeout(() => {
+    if (isSpeaking) {
+      console.warn('SpeechSynthesis watchdog timeout. Resetting state.');
+      isSpeaking = false;
+      try { window.speechSynthesis.cancel(); } catch { }
+      processQueue();
+    }
+  }, Math.max(8000, text.length * 150));
+
+  const targetBcp47 = LANG_CODE[langName] || 'en-US';
+  const langPrefix = targetBcp47.slice(0, 2);
+
+  const doSpeak = () => {
+    try {
+      window.speechSynthesis.resume();
+      const utt = new SpeechSynthesisUtterance(text);
+      utt.lang = targetBcp47;
+      utt.rate = 0.95;
+      utt.volume = 1;
+
+      const voices = window.speechSynthesis.getVoices();
+      if (voices && voices.length > 0) {
+        const match = voices.find(v => v.lang === targetBcp47) ||
+          voices.find(v => v.lang.startsWith(langPrefix)) ||
+          voices.find(v => v.default);
+        if (match) utt.voice = match;
+      }
+
+      utt.onend = () => {
+        clearTimeout(speechWatchdog);
+        isSpeaking = false;
+        setTimeout(processQueue, 300);
+      };
+
+      utt.onerror = (e) => {
+        clearTimeout(speechWatchdog);
+        console.warn('Speech error:', e);
+        isSpeaking = false;
+        setTimeout(processQueue, 200);
+      };
+
+      window.speechSynthesis.speak(utt);
+    } catch (err) {
+      clearTimeout(speechWatchdog);
+      isSpeaking = false;
+      setTimeout(processQueue, 200);
+    }
+  };
+
+  // If voices aren't populated yet, wait up to 250ms for onvoiceschanged, then speak anyway
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices || voices.length === 0) {
+    let fired = false;
+    const timeout = setTimeout(() => {
+      if (!fired) {
+        fired = true;
+        doSpeak();
+      }
+    }, 250);
+
+    window.speechSynthesis.onvoiceschanged = () => {
+      if (!fired) {
+        fired = true;
+        clearTimeout(timeout);
+        doSpeak();
+      }
+    };
+  } else {
+    doSpeak();
+  }
+}
+
 function speak(text: string, langName: string) {
+  unlockAudio();
   playChime();
   speechQueue.push({ text, langName });
   processQueue();
@@ -395,9 +478,31 @@ export default function GuestDashboard() {
 
           {/* Announcements */}
           <GlassCard>
-            <div className="flex items-center gap-2 mb-3">
-              <Megaphone size={18} className="text-emerald-400" />
-              <h2 className="font-outfit text-white text-lg font-semibold">Community Alerts</h2>
+            <div className="flex items-center justify-between mb-3">
+              <div className="flex items-center gap-2">
+                <Megaphone size={18} className="text-emerald-400" />
+                <h2 className="font-outfit text-white text-lg font-semibold">Community Alerts</h2>
+              </div>
+              <button
+                onClick={() => {
+                  unlockAudio();
+                  const testText =
+                    guestProfile?.language === 'Hindi'
+                      ? 'आपातकालीन उद्घोषणा प्रणाली सक्रिय है।'
+                      : guestProfile?.language === 'Spanish'
+                      ? 'El sistema de anuncios de emergencia está activo y listo.'
+                      : guestProfile?.language === 'French'
+                      ? 'Le système d\'annonces d\'urgence est actif et prêt.'
+                      : 'Emergency voice announcement system is active and ready.';
+                  speak(testText, guestProfile?.language || 'English');
+                  toast.success(`🔊 Testing voice announcement (${guestProfile?.language || 'English'})`);
+                }}
+                className="text-xs flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/20 transition-colors cursor-pointer"
+                title="Test voice announcement in your language"
+              >
+                <Volume2 size={13} />
+                <span>Test Voice</span>
+              </button>
             </div>
             <div className="flex flex-col gap-2 max-h-52 overflow-y-auto custom-scroll">
               <AnimatePresence>
@@ -414,9 +519,22 @@ export default function GuestDashboard() {
                     >
                       <div className="flex items-center justify-between mb-1">
                         <span className="text-white/40 text-xs">{msg.timestamp.split('T')[1] ?? msg.timestamp}</span>
-                        <span className="bg-emerald-500/20 text-emerald-400 text-xs rounded-full px-2 py-0.5 font-bold">
-                          {msg.target.startsWith('room') ? 'Priority Alert' : targetLabels[msg.target] || 'General'}
-                        </span>
+                        <div className="flex items-center gap-2">
+                          <button
+                            onClick={() => {
+                              unlockAudio();
+                              speak(msg.message, guestProfile?.language || 'English');
+                            }}
+                            className="flex items-center gap-1 text-xs text-emerald-400 hover:text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/20 px-2 py-0.5 rounded transition-colors cursor-pointer"
+                            title="Listen announcement in chosen language"
+                          >
+                            <Volume2 size={12} />
+                            <span>Listen</span>
+                          </button>
+                          <span className="bg-emerald-500/20 text-emerald-400 text-xs rounded-full px-2 py-0.5 font-bold">
+                            {msg.target.startsWith('room') ? 'Priority Alert' : targetLabels[msg.target] || 'General'}
+                          </span>
+                        </div>
                       </div>
                       <p className="text-white/80 text-sm">{msg.message}</p>
                     </motion.div>

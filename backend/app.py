@@ -288,6 +288,96 @@ def resolve_alerts_by_room():
     return jsonify({'success': True})
 
 
+# ─── Translation & Broadcast Helpers ──────────────────────────────────────────
+
+TRANSLATION_CACHE = {}
+
+LANG_MAP = {
+    'english': 'en',
+    'hindi': 'hi',
+    'spanish': 'es',
+    'french': 'fr',
+    'arabic': 'ar',
+    'german': 'de',
+    'chinese': 'zh-CN',
+    'japanese': 'ja',
+    'russian': 'ru',
+    'portuguese': 'pt',
+    'italian': 'it',
+    'korean': 'ko',
+    'dutch': 'nl',
+    'turkish': 'tr',
+    'polish': 'pl',
+}
+
+def translate_text(text: str, target_lang_name: str) -> str:
+    """Translates text reliably with in-memory caching and resilient fallbacks."""
+    if not text or not text.strip():
+        return text
+
+    clean_lang = (target_lang_name or 'en').strip()
+    target_code = LANG_MAP.get(clean_lang.lower(), clean_lang.lower())
+
+    if target_code in ('en', 'english', ''):
+        return text
+
+    cache_key = (text.strip(), target_code)
+    if cache_key in TRANSLATION_CACHE:
+        return TRANSLATION_CACHE[cache_key]
+
+    # Strategy 1: Google Translate single endpoint (fast, free, handles full sentences)
+    try:
+        import urllib.request
+        import urllib.parse
+        import json
+        q = urllib.parse.quote(text.strip())
+        url = f"https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl={target_code}&dt=t&q={q}"
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'})
+        with urllib.request.urlopen(req, timeout=4) as response:
+            data = json.loads(response.read().decode('utf-8'))
+            pieces = [s[0] for s in data[0] if s and s[0]]
+            translated = "".join(pieces).strip()
+            if translated:
+                TRANSLATION_CACHE[cache_key] = translated
+                return translated
+    except Exception as e:
+        print(f"Primary translation warning for '{target_code}': {e}")
+
+    # Strategy 2: GoogleTranslator from deep_translator
+    try:
+        from deep_translator import GoogleTranslator
+        translated = GoogleTranslator(source='auto', target=target_code).translate(text.strip())
+        if translated:
+            TRANSLATION_CACHE[cache_key] = translated
+            return translated
+    except Exception as e:
+        print(f"DeepTranslator fallback warning for '{target_code}': {e}")
+
+    # Strategy 3: Gemini translation fallback
+    if client:
+        try:
+            prompt = f"Translate the following emergency notification to {clean_lang}. Return ONLY the direct translation text with no formatting, markdown, quotes or explanations:\n{text.strip()}"
+            resp = client.models.generate_content(
+                model='gemini-2.5-flash-lite',
+                contents=prompt
+            )
+            translated = resp.text.strip().replace('"', '').strip()
+            if translated:
+                TRANSLATION_CACHE[cache_key] = translated
+                return translated
+        except Exception as e:
+            print(f"Gemini translation fallback warning: {e}")
+
+    return text
+
+@app.route('/api/translate', methods=['POST'])
+def handle_translate():
+    data = request.get_json(force=True) or {}
+    text = str(data.get('text', '')).strip()
+    target_lang = str(data.get('language', 'English')).strip()
+    translated = translate_text(text, target_lang)
+    return jsonify({'translated': translated, 'original': text, 'language': target_lang})
+
 # ─── Broadcasts ───────────────────────────────────────────────────────────────
 
 @app.route('/api/broadcasts', methods=['GET'])
@@ -298,34 +388,34 @@ def get_broadcasts():
     except:
         return jsonify([])
 
-    lang_map = {
-        'English': 'en', 'Hindi': 'hi', 'Spanish': 'es', 'French': 'fr',
-        'Arabic': 'ar', 'German': 'de', 'Chinese': 'zh-CN', 'Japanese': 'ja',
-        'Russian': 'ru', 'Portuguese': 'pt'
-    }
-    target_lang = lang_map.get(lang, lang.lower()) if lang else 'en'
+    if not lang or lang.strip().lower() in ('english', 'en'):
+        return jsonify(broadcasts)
 
-    if target_lang != 'en' and broadcasts:
-        try:
-            translator = GoogleTranslator(source='auto', target=target_lang)
-            for idx, b in enumerate(broadcasts):
-                try:
-                    broadcasts[idx]['message'] = translator.translate(b['message'])
-                except: pass
-        except: pass
+    # Return translated messages without mutating stored messages
+    translated_broadcasts = []
+    for b in broadcasts:
+        b_copy = dict(b)
+        original_msg = b.get('message', '')
+        b_copy['message'] = translate_text(original_msg, lang)
+        translated_broadcasts.append(b_copy)
 
-    return jsonify(broadcasts)
+    return jsonify(translated_broadcasts)
 
 @app.route('/api/ai/suggest-broadcast', methods=['GET'])
 def ai_suggest_broadcast():
     target = request.args.get('target', 'all')
     if client:
         try:
-            prompt = f"Write a single sentence emergency broadcast announcement to guests in {target}. Keep it extremely concise, professional, and clear."
-            resp = client.models.generate_content(
-                model='gemini-2.5-flash',
-                contents=prompt
-            )
+            try:
+                resp = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=prompt
+                )
+            except Exception:
+                resp = client.models.generate_content(
+                    model='gemini-2.5-flash-lite',
+                    contents=prompt
+                )
             suggestion = resp.text.strip().replace('"', '')
             return jsonify({'suggestion': suggestion})
         except Exception as e:
